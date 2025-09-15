@@ -83,7 +83,7 @@ def train_model_simple(model, train_loader, val_loader,
     return train_losses, val_losses, track_tokens_seen
 
 
-def evaluate_model(model, train, val_loader, device, eval_iter):
+def evaluate_model(model, train_loader, val_loader, device, eval_iter):
     model.eval()
     with torch.no_grad():
         train_loss = calc_loss_loader(
