@@ -1,0 +1,5 @@
+agentic implementation
+======
+seems like this problem benchmarks close to autonomous driving.  The idea is that the agent can take both predictive and real-world paths.  As the agent traverses the predictive side, it does so by querying all the extreme-weather databases as well as short-term real-world forecasts.  it would go through the fastest path determined.
+an agent needs to be a learning agent (almost top of the line).  it needs to query both prediction models (fire, flood, tornado, etc), and current weather data to determine the risk to completing the goal.  the goal is to deliver the package with the vehicle in the shortest amount of time.
+not sure we have to design this logic, but it is a combination of following the shortest path first, where risk of extreme weather is a potential eliminator of possible paths.  this uses extreme weather decisions as a filtering criteria vs 
