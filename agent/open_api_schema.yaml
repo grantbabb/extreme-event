@@ -1,0 +1,123 @@
+# openapi_schema.yaml
+openapi: 3.0.0
+info:
+  title: City Coordinates Geocoding API
+  description: >
+    Professional geocoding API that retrieves accurate latitude and longitude coordinates 
+    for cities worldwide using authoritative data sources (OpenCage, Google Maps, or Nominatim).
+    Includes distance calculation between cities.
+  version: 2.0.0
+  contact:
+    name: Geocoding API Support
+
+paths:
+  /getCityCoordinates:
+    get:
+      summary: Get coordinates for a single city
+      description: >
+        Retrieves accurate geographic coordinates (latitude/longitude) for a specified city
+        using professional geocoding services. Returns detailed location information including
+        country, formatted address, and data source.
+      operationId: getCityCoordinates
+      parameters:
+        - name: cityName
+          in: query
+          description: >
+            Name of the city to geocode. Can include country or state for disambiguation
+            (e.g., "Paris", "Paris, France", or "Paris, Texas")
+          required: true
+          schema:
+            type: string
+            example: "Tokyo"
+      responses:
+        '200':
+          description: Successfully retrieved city coordinates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    description: Whether the geocoding was successful
+                  city:
+                    type: string
+                    description: City name as queried
+                  latitude:
+                    type: number
+                    format: double
+                    description: Latitude in decimal degrees
+                  longitude:
+                    type: number
+                    format: double
+                    description: Longitude in decimal degrees
+                  formatted_address:
+                    type: string
+                    description: Full formatted address
+                  country:
+                    type: string
+                    description: Country name
+                  country_code:
+                    type: string
+                    description: ISO country code
+                  state:
+                    type: string
+                    description: State or region name (if applicable)
+                  source:
+                    type: string
+                    description: Data source used for geocoding
+                  confidence:
+                    type: number
+                    description: Confidence level (if provided by API)
+                  timezone:
+                    type: string
+                    description: Timezone (if available)
+
+  /getTwoCitiesCoordinates:
+    get:
+      summary: Get coordinates for source and destination cities with distance
+      description: >
+        Retrieves coordinates for both a source city and destination city, and calculates
+        the straight-line distance between them in both kilometers and miles.
+      operationId: getTwoCitiesCoordinates
+      parameters:
+        - name: sourceCity
+          in: query
+          description: Name of the source/origin city
+          required: true
+          schema:
+            type: string
+            example: "London"
+        - name: destinationCity
+          in: query
+          description: Name of the destination city
+          required: true
+          schema:
+            type: string
+            example: "New York"
+      responses:
+        '200':
+          description: Successfully retrieved coordinates and calculated distance
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  source:
+                    type: object
+                    description: Source city information
+                  destination:
+                    type: object
+                    description: Destination city information
+                  distance:
+                    type: object
+                    properties:
+                      distance_km:
+                        type: number
+                        description: Distance in kilometers
+                      distance_miles:
+                        type: number
+                        description: Distance in miles
+                      straight_line:
+                        type: boolean
+                        description: Indicates this is straight-line distance
