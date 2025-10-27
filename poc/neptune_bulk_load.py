@@ -164,6 +164,7 @@ def main():
 
     for i, config in enumerate(step_configs, 1):
         print(f"\n=== Running bulk load step {i}/{len(step_configs)} ===")
+        # 0) TODO add in preprocess code
         # 1) Upload CSVs to S3
         upload_csvs_to_s3(
             bucket=S3_BUCKET,
@@ -190,7 +191,8 @@ def main():
             poll_seconds=10
         )
         print(json.dumps(final, indent=2))
-        # 4) Clean up S3
+        # 4) TODO: verify with opencypher query
+        # 5) Clean up S3
         delete_csvs_from_s3(
             bucket=S3_BUCKET,
             prefix=S3_PREFIX,
