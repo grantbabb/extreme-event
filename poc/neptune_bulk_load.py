@@ -19,7 +19,7 @@ def upload_csvs_to_s3(bucket: str, prefix: str, local_files: List[str], region: 
 
 
 def start_bulk_load(
-    neptune_endpoint: str,
+    neptune_url: str,
     port: int,
     s3_bucket: str,
     s3_prefix: str,
@@ -102,18 +102,27 @@ def poll_bulk_load(neptune_endpoint: str, port: int, load_id: str,
 def main():
     # ---- Fill these in ----
     AWS_REGION = os.environ.get("AWS_REGION", "us-west-2")
+    AWS_SERVICE = os.environ.get("AWS_SERVICE", "neptune-db")
     S3_BUCKET = os.environ["S3_BUCKET"]                 # e.g., "my-neptune-load-bucket"
     S3_PREFIX = os.environ.get("S3_PREFIX", "neptune-load-demo")  # folder to load
     # role with S3 read perms and Neptune load perms
     IAM_ROLE_ARN = os.environ["IAM_ROLE_ARN"]           
-    # e.g., "your-cluster.cluster-xxxx.us-east-1.neptune.amazonaws.com"
+    # e.g., "your-cluster.cluster-xxxx.us-east-1.neptune.amazonaws.com"   
     NEPTUNE_ENDPOINT = os.environ["NEPTUNE_ENDPOINT"]
     NEPTUNE_PORT = int(os.environ.get("NEPTUNE_PORT", "8182"))
     # LOCAL_NODE_FILE = os.environ.get("LOCAL_NODE_FILE", "nodes.csv")
     LOCAL_EDGE_FILE = os.environ.get("LOCAL_EDGE_FILE", 
                                      "../data/datasets/roads/edges.csv")
-    # ------------------------
 
+    # ------------------------
+    #neptune_endpoint = "db-neptune-dev.cluster-criq8uemaejw.us-west-2.neptune.amazonaws.com"
+    port=8182
+    #region = 'us-west-2'
+    
+    url = f"https://{NEPTUNE_ENDPOINT}:{ NEPTUNE_PORT}/"
+    load = "loader/"
+    query = "openCypher/"
+    
     # 1) Upload CSVs to S
     upload_csvs_to_s3(
         bucket=S3_BUCKET,
@@ -124,8 +133,7 @@ def main():
 
     # 2) Start bulk load (point to the S3 prefix)
     load_id = start_bulk_load(
-        neptune_endpoint=NEPTUNE_ENDPOINT,
-        port=NEPTUNE_PORT,
+        url = url,
         s3_bucket=S3_BUCKET,
         s3_prefix=S3_PREFIX,
         iam_role_arn=IAM_ROLE_ARN,
