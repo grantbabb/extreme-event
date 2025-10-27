@@ -1,13 +1,10 @@
-import os
-import time
+import time 
+import requests 
+from requests_auth_aws_sigv4 import AWSSigV4
 import json
 import boto3
-import requests
+import os
 from typing import List, Optional
-from boto3 import Session
-from botocore.auth import SigV4Auth
-from botocore.awsrequest import AWSRequest
-from requests_auth_aws_sigv4 import AWSSigV4
 # If your Neptune cluster uses a self-signed cert, you may set VERIFY_TLS=False.
 # Prefer providing a proper CA bundle path via VERIFY_TLS=str(path_to_cabundle) in production.
 VERIFY_TLS: Optional[bool | str] = True  # or False or "/path/to/ca-bundle.pem"
