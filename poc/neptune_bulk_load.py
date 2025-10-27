@@ -34,10 +34,7 @@ def start_bulk_load(
     edge_only_load: bool = False,
     queue_request: bool = True,
 ) -> str:
-    credentials = Session().get_credentials()
-    if credentials is None:
-        raise Exception("No AWS credentials found")
-    creds = credentials.get_frozen_credentials()
+
     service = 'neptune-db'
     # conn_string = 'wss://' + neptune_endpoint + ':8182/gremlin'
     # region set inside config profile 
@@ -48,7 +45,7 @@ def start_bulk_load(
 
     payload = {
         "source": source,
-        "format": "csv",  # Neptune CSV (nodes/edges)
+        "format": "opencypher",  # Neptune CSV (nodes/edges)
         "iamRoleArn": iam_role_arn,
         "region": region,
         "failOnError": fail_on_error,
@@ -62,9 +59,9 @@ def start_bulk_load(
     }
     print(f"Starting bulk load from {source}")
     print(payload)
-    #request = AWSRequest(method='GET', url=url, data=None)
-    #SigV4Auth(creds, service, region).add_auth(request)
-    #aws_auth = AWSSigV4(service, region=region)
+    request = AWSRequest(method='GET', url=url, data=None)
+    SigV4Auth(creds, service, region).add_auth(request)
+    aws_auth = AWSSigV4(service, region=region)
     #headers = dict([(x,request.headers[x]) for x in request.headers])
     #print("request:", aws_auth)
     # headers = {'Authorization': request.headers["Authorization"],
@@ -74,8 +71,8 @@ def start_bulk_load(
                          json=payload, 
                          timeout=120, 
                          verify=VERIFY_TLS,
-                         # auth=aws_auth
-                         # headers=headers
+                         #auth=aws_auth
+                         headers=dict(request.headers).items()
                         )
     #print(creds)
     #resp.raise_for_status()
@@ -120,7 +117,7 @@ def main():
                                      "../data/datasets/roads/edges.csv")
     # ------------------------
 
-    # 1) Upload CSVs to S3
+    # 1) Upload CSVs to S
     upload_csvs_to_s3(
         bucket=S3_BUCKET,
         prefix=S3_PREFIX,
@@ -136,7 +133,7 @@ def main():
         s3_prefix=S3_PREFIX,
         iam_role_arn=IAM_ROLE_ARN,
         region=AWS_REGION,
-        user_provided_edge_ids=False,   # set False if your edges don't have ~id
+        user_provided_edge_ids=True,   # set False if your edges don't have ~id
         parallelism="MEDIUM",
         fail_on_error="TRUE",
         edge_only_load="TRUE",
