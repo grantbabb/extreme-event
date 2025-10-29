@@ -1,0 +1,38 @@
+[
+  {
+    "ParameterKey": "AgentName",
+    "ParameterValue": "city-coordinates-agent"
+  },
+  {
+    "ParameterKey": "GeocodingProvider",
+    "ParameterValue": "nominatim"
+  },
+  {
+    "ParameterKey": "OpenCageApiKey",
+    "ParameterValue": ""
+  },
+  {
+    "ParameterKey": "GoogleMapsApiKey",
+    "ParameterValue": ""
+  },
+  {
+    "ParameterKey": "LambdaTimeout",
+    "ParameterValue": "30"
+  },
+  {
+    "ParameterKey": "LambdaMemorySize",
+    "ParameterValue": "256"
+  },
+  {
+    "ParameterKey": "LogRetentionDays",
+    "ParameterValue": "14"
+  },
+  {
+    "ParameterKey": "ClaudeModelId",
+    "ParameterValue": "anthropic.claude-3-5-sonnet-20241022-v2:0"
+  },
+  {
+    "ParameterKey": "Environment",
+    "ParameterValue": "production"
+  }
+]

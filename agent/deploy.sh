@@ -116,6 +116,8 @@ cd ..
 echo -e "${GREEN}✓ Lambda package created${NC}\n"
 
 # Validate CloudFormation template
+echo -e "${GREEN}✓ Region is $REGION\n"
+
 echo -e "${YELLOW}Validating CloudFormation template...${NC}"
 aws cloudformation validate-template \
     --template-body file://$TEMPLATE_FILE \
