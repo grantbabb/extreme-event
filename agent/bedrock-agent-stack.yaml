@@ -1,0 +1,450 @@
+# cloudformation-template-with-custom-resources.yaml
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Bedrock Agent with Custom Resources for full control'
+
+Parameters:
+  AgentName:
+    Type: String
+    Default: city-coordinates-agent
+  
+  GeocodingProvider:
+    Type: String
+    Default: nominatim
+    AllowedValues: [opencage, google, nominatim]
+  
+  OpenCageApiKey:
+    Type: String
+    Default: ''
+    NoEcho: true
+  
+  GoogleMapsApiKey:
+    Type: String
+    Default: ''
+    NoEcho: true
+  
+  ClaudeModelId:
+    Type: String
+    Default: anthropic.claude-3-5-sonnet-20241022-v2:0
+
+Resources:
+  # ==================== LAMBDA FOR GEOCODING ====================
+  
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AgentName}-lambda-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  LambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${AgentName}-function'
+      RetentionInDays: 14
+
+  CityCoordinatesFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${AgentName}-function'
+      Runtime: python3.11
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          OPENCAGE_API_KEY: !Ref OpenCageApiKey
+          GOOGLE_MAPS_API_KEY: !Ref GoogleMapsApiKey
+          GEOCODING_PROVIDER: !Ref GeocodingProvider
+      Code:
+        ZipFile: |
+          # Placeholder - will be updated via deployment script
+          import json
+          def lambda_handler(event, context):
+              return {'statusCode': 200, 'body': json.dumps('Update with actual code')}
+    DependsOn: LambdaLogGroup
+
+  LambdaBedrockPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref CityCoordinatesFunction
+      Action: lambda:InvokeFunction
+      Principal: bedrock.amazonaws.com
+      SourceArn: !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:agent/*'
+
+  # ==================== BEDROCK AGENT ROLE ====================
+  
+  BedrockAgentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AgentName}-bedrock-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:agent/*'
+      Policies:
+        - PolicyName: BedrockAgentPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource: !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/${ClaudeModelId}'
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt CityCoordinatesFunction.Arn
+
+  # ==================== S3 FOR OPENAPI SCHEMA ====================
+  
+  OpenAPIBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${AgentName}-openapi-${AWS::AccountId}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # ==================== CUSTOM RESOURCE LAMBDA ====================
+  
+  CustomResourceLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AgentName}-custom-resource-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: BedrockAgentManagement
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:CreateAgent
+                  - bedrock:UpdateAgent
+                  - bedrock:DeleteAgent
+                  - bedrock:GetAgent
+                  - bedrock:PrepareAgent
+                  - bedrock:CreateAgentActionGroup
+                  - bedrock:UpdateAgentActionGroup
+                  - bedrock:DeleteAgentActionGroup
+                  - bedrock:GetAgentActionGroup
+                  - bedrock:CreateAgentAlias
+                  - bedrock:UpdateAgentAlias
+                  - bedrock:DeleteAgentAlias
+                  - bedrock:GetAgentAlias
+                  - bedrock:ListAgentActionGroups
+                  - bedrock:ListAgentAliases
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource: !GetAtt BedrockAgentRole.Arn
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource: !Sub '${OpenAPIBucket.Arn}/*'
+
+  CustomResourceLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${AgentName}-custom-resource'
+      RetentionInDays: 7
+
+  BedrockAgentCustomResourceFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${AgentName}-custom-resource'
+      Runtime: python3.11
+      Handler: index.handler
+      Role: !GetAtt CustomResourceLambdaRole.Arn
+      Timeout: 300
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          import json
+          import time
+          
+          bedrock = boto3.client('bedrock-agent')
+          
+          def handler(event, context):
+              print(f"Event: {json.dumps(event)}")
+              
+              request_type = event['RequestType']
+              properties = event['ResourceProperties']
+              
+              try:
+                  if request_type == 'Create':
+                      response = create_agent(properties)
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, response)
+                  
+                  elif request_type == 'Update':
+                      response = update_agent(properties, event['PhysicalResourceId'])
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, response)
+                  
+                  elif request_type == 'Delete':
+                      delete_agent(event['PhysicalResourceId'])
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                  
+              except Exception as e:
+                  print(f"Error: {str(e)}")
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': str(e)})
+          
+          def create_agent(props):
+              print("Creating Bedrock Agent...")
+              
+              # Create agent
+              agent_response = bedrock.create_agent(
+                  agentName=props['AgentName'],
+                  agentResourceRoleArn=props['AgentRoleArn'],
+                  description=props.get('Description', 'City coordinates agent'),
+                  foundationModel=props['FoundationModel'],
+                  instruction=props['Instruction'],
+                  idleSessionTTLInSeconds=int(props.get('IdleSessionTTL', 900))
+              )
+              
+              agent_id = agent_response['agent']['agentId']
+              print(f"Agent created: {agent_id}")
+              
+              # Wait for agent to be ready
+              time.sleep(5)
+              
+              # Create action group
+              print("Creating action group...")
+              action_group_response = bedrock.create_agent_action_group(
+                  agentId=agent_id,
+                  agentVersion='DRAFT',
+                  actionGroupName='CityCoordinatesActions',
+                  description='Actions to retrieve city coordinates',
+                  actionGroupExecutor={
+                      'lambda': props['LambdaArn']
+                  },
+                  apiSchema={
+                      's3': {
+                          's3BucketName': props['OpenAPIBucket'],
+                          's3ObjectKey': 'openapi_schema.yaml'
+                      }
+                  },
+                  actionGroupState='ENABLED'
+              )
+              
+              action_group_id = action_group_response['agentActionGroup']['actionGroupId']
+              print(f"Action group created: {action_group_id}")
+              
+              # Prepare agent
+              print("Preparing agent...")
+              bedrock.prepare_agent(agentId=agent_id)
+              time.sleep(10)
+              
+              # Create alias
+              print("Creating agent alias...")
+              alias_response = bedrock.create_agent_alias(
+                  agentId=agent_id,
+                  agentAliasName='production',
+                  description='Production alias'
+              )
+              
+              alias_id = alias_response['agentAlias']['agentAliasId']
+              print(f"Alias created: {alias_id}")
+              
+              return {
+                  'AgentId': agent_id,
+                  'AgentArn': agent_response['agent']['agentArn'],
+                  'AliasId': alias_id,
+                  'AliasArn': alias_response['agentAlias']['agentAliasArn'],
+                  'ActionGroupId': action_group_id
+              }
+          
+          def update_agent(props, agent_id):
+              print(f"Updating agent: {agent_id}")
+              
+              try:
+                  # Update agent
+                  bedrock.update_agent(
+                      agentId=agent_id,
+                      agentName=props['AgentName'],
+                      agentResourceRoleArn=props['AgentRoleArn'],
+                      foundationModel=props['FoundationModel'],
+                      instruction=props['Instruction'],
+                      idleSessionTTLInSeconds=int(props.get('IdleSessionTTL', 900))
+                  )
+                  
+                  # Prepare agent
+                  bedrock.prepare_agent(agentId=agent_id)
+                  time.sleep(5)
+                  
+                  # Get existing resources
+                  agent = bedrock.get_agent(agentId=agent_id)
+                  
+                  # Get alias
+                  aliases = bedrock.list_agent_aliases(agentId=agent_id)
+                  alias_id = aliases['agentAliasSummaries'][0]['agentAliasId'] if aliases['agentAliasSummaries'] else None
+                  
+                  return {
+                      'AgentId': agent_id,
+                      'AgentArn': agent['agent']['agentArn'],
+                      'AliasId': alias_id,
+                      'Message': 'Agent updated successfully'
+                  }
+              
+              except Exception as e:
+                  print(f"Update error: {str(e)}")
+                  raise
+          
+          def delete_agent(agent_id):
+              print(f"Deleting agent: {agent_id}")
+              
+              try:
+                  # Delete aliases
+                  aliases = bedrock.list_agent_aliases(agentId=agent_id)
+                  for alias in aliases.get('agentAliasSummaries', []):
+                      print(f"Deleting alias: {alias['agentAliasId']}")
+                      bedrock.delete_agent_alias(
+                          agentId=agent_id,
+                          agentAliasId=alias['agentAliasId']
+                      )
+                  
+                  time.sleep(2)
+                  
+                  # Delete action groups
+                  action_groups = bedrock.list_agent_action_groups(
+                      agentId=agent_id,
+                      agentVersion='DRAFT'
+                  )
+                  for ag in action_groups.get('actionGroupSummaries', []):
+                      print(f"Deleting action group: {ag['actionGroupId']}")
+                      bedrock.delete_agent_action_group(
+                          agentId=agent_id,
+                          agentVersion='DRAFT',
+                          actionGroupId=ag['actionGroupId']
+                      )
+                  
+                  time.sleep(2)
+                  
+                  # Delete agent
+                  print("Deleting agent...")
+                  bedrock.delete_agent(agentId=agent_id)
+                  
+                  print("Agent deleted successfully")
+              
+              except Exception as e:
+                  print(f"Delete error: {str(e)}")
+                  # Don't raise on delete - allow cleanup to continue
+    DependsOn: CustomResourceLambdaLogGroup
+
+  # ==================== CUSTOM RESOURCE INVOCATION ====================
+  
+  BedrockAgent:
+    Type: Custom::BedrockAgent
+    Properties:
+      ServiceToken: !GetAtt BedrockAgentCustomResourceFunction.Arn
+      AgentName: !Ref AgentName
+      AgentRoleArn: !GetAtt BedrockAgentRole.Arn
+      FoundationModel: !Ref ClaudeModelId
+      LambdaArn: !GetAtt CityCoordinatesFunction.Arn
+      OpenAPIBucket: !Ref OpenAPIBucket
+      IdleSessionTTL: 900
+      Instruction: |
+        You are a professional geographic information assistant that helps users find accurate latitude 
+        and longitude coordinates for cities worldwide.
+        
+        Your capabilities:
+        1. Look up coordinates for any city using authoritative geocoding APIs
+        2. Provide detailed location information including country, state/region, and formatted address
+        3. Calculate straight-line distances between two cities in both kilometers and miles
+        
+        When responding:
+        - Always provide coordinates with at least 4 decimal places for accuracy
+        - Include the data source and confidence level when available
+        - Mention the country to avoid confusion with cities of the same name
+        - For distance calculations, clarify that it's straight-line distance
+        - If a city cannot be found, suggest checking the spelling
+        
+        Be conversational, helpful, and accurate.
+    DependsOn:
+      - BedrockAgentRole
+      - CityCoordinatesFunction
+      - LambdaBedrockPermission
+
+  # ==================== CLOUDWATCH ALARMS ====================
+  
+  LambdaErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AgentName}-lambda-errors'
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref CityCoordinatesFunction
+
+Outputs:
+  AgentId:
+    Description: Bedrock Agent ID
+    Value: !GetAtt BedrockAgent.AgentId
+    Export:
+      Name: !Sub '${AWS::StackName}-AgentId'
+
+  AgentArn:
+    Description: Bedrock Agent ARN
+    Value: !GetAtt BedrockAgent.AgentArn
+    Export:
+      Name: !Sub '${AWS::StackName}-AgentArn'
+
+  AgentAliasId:
+    Description: Bedrock Agent Alias ID
+    Value: !GetAtt BedrockAgent.AliasId
+    Export:
+      Name: !Sub '${AWS::StackName}-AgentAliasId'
+
+  AgentAliasArn:
+    Description: Bedrock Agent Alias ARN
+    Value: !GetAtt BedrockAgent.AliasArn
+    Export:
+      Name: !Sub '${AWS::StackName}-AgentAliasArn'
+
+  LambdaFunctionName:
+    Description: Lambda function name
+    Value: !Ref CityCoordinatesFunction
+
+  LambdaFunctionArn:
+    Description: Lambda function ARN
+    Value: !GetAtt CityCoordinatesFunction.Arn
+
+  OpenAPIBucketName:
+    Description: S3 bucket for OpenAPI schema
+    Value: !Ref OpenAPIBucket
