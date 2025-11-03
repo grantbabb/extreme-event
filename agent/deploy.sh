@@ -101,6 +101,28 @@ EOF
 
 echo -e "${GREEN}✓ Parameters file created${NC}\n"
 
+# Get AWS Account ID for S3 bucket name
+echo -e "${YELLOW}Getting AWS Account ID...${NC}"
+AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text --region $REGION)
+echo -e "${GREEN}Account ID: $AWS_ACCOUNT_ID${NC}"
+
+# Get AgentName from parameters file
+AGENT_NAME=$(cat $PARAMETERS_FILE | grep -A 1 '"ParameterKey": "AgentName"' | grep "ParameterValue" | cut -d'"' -f4)
+S3_BUCKET_NAME="${AGENT_NAME}-openapi-${AWS_ACCOUNT_ID}"
+
+echo -e "${YELLOW}S3 Bucket for schema: $S3_BUCKET_NAME${NC}"
+
+# Upload OpenAPI schema to S3
+echo -e "${GREEN}Uploading OpenAPI schema to S3...${NC}"
+aws s3 cp $OPENAPI_SCHEMA_FILE s3://$S3_BUCKET_NAME/openapi_schema.yaml --region $REGION
+
+if [ $? -eq 0 ]; then
+    echo -e "${GREEN}OpenAPI schema uploaded successfully to s3://$S3_BUCKET_NAME/openapi_schema.yaml${NC}"
+else
+    echo -e "${RED}Failed to upload OpenAPI schema${NC}"
+    exit 1
+fi
+
 # Prepare Lambda deployment package
 echo -e "${YELLOW}Creating Lambda deployment package...${NC}"
 
