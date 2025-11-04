@@ -226,6 +226,15 @@ Resources:
                   - bedrock:Retrieve
                   - bedrock:RetrieveAndGenerate
                 Resource: '*'
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource: !Sub '${OpenAPIBucket.Arn}/*'
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: !GetAtt OpenAPIBucket.Arn               
       Tags:
         - Key: Name
           Value: !Sub '${AgentName}-bedrock-role'
@@ -258,6 +267,253 @@ Resources:
         - Key: Environment
           Value: !Ref Environment
 
+  # ==================== UPLOAD OPENAPI SCHEMA TO S3 ====================
+  
+  UploadSchemaLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AgentName}-upload-schema-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3UploadPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub '${OpenAPIBucket.Arn}/*'
+      Tags:
+        - Key: Name
+          Value: !Sub '${AgentName}-upload-schema-role'
+        - Key: Environment
+          Value: !Ref Environment
+
+  UploadSchemaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${AgentName}-upload-schema'
+
+  UploadSchemaFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: UploadSchemaLogGroup
+    Properties:
+      FunctionName: !Sub '${AgentName}-upload-schema'
+      Runtime: python3.11
+      Handler: index.handler
+      Role: !GetAtt UploadSchemaLambdaRole.Arn
+      Timeout: 60
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          import json
+          import traceback
+          
+          s3 = boto3.client('s3')
+          
+          OPENAPI_SCHEMA = """openapi: 3.0.0
+          info:
+            title: City Coordinates API
+            version: 1.0.0
+            description: API for retrieving city coordinates and calculating distances between cities
+          
+          paths:
+            /coordinates:
+              get:
+                summary: Get coordinates for a city
+                description: Retrieves latitude and longitude coordinates for a specified city
+                operationId: getCoordinates
+                parameters:
+                  - name: city
+                    in: query
+                    description: Name of the city (e.g., "Portland")
+                    required: true
+                    schema:
+                      type: string
+                  - name: state
+                    in: query
+                    description: State or province (optional, e.g., "Oregon")
+                    required: false
+                    schema:
+                      type: string
+                  - name: country
+                    in: query
+                    description: Country name or code (optional, e.g., "USA")
+                    required: false
+                    schema:
+                      type: string
+                responses:
+                  '200':
+                    description: Successful response with coordinates
+                    content:
+                      application/json:
+                        schema:
+                          type: object
+                          properties:
+                            latitude:
+                              type: number
+                              format: double
+                              description: Latitude coordinate
+                            longitude:
+                              type: number
+                              format: double
+                              description: Longitude coordinate
+                            city:
+                              type: string
+                              description: City name
+                            country:
+                              type: string
+                              description: Country name
+                            state:
+                              type: string
+                              description: State or region
+                            formatted_address:
+                              type: string
+                              description: Full formatted address
+                            data_source:
+                              type: string
+                              description: Geocoding provider used
+                            confidence:
+                              type: number
+                              description: Confidence level (0-10)
+            
+            /distance:
+              get:
+                summary: Calculate distance between two cities
+                description: Calculates the straight-line distance between two cities
+                operationId: calculateDistance
+                parameters:
+                  - name: city1
+                    in: query
+                    description: First city name
+                    required: true
+                    schema:
+                      type: string
+                  - name: city2
+                    in: query
+                    description: Second city name
+                    required: true
+                    schema:
+                      type: string
+                  - name: state1
+                    in: query
+                    description: State for first city (optional)
+                    required: false
+                    schema:
+                      type: string
+                  - name: state2
+                    in: query
+                    description: State for second city (optional)
+                    required: false
+                    schema:
+                      type: string
+                  - name: country1
+                    in: query
+                    description: Country for first city (optional)
+                    required: false
+                    schema:
+                      type: string
+                  - name: country2
+                    in: query
+                    description: Country for second city (optional)
+                    required: false
+                    schema:
+                      type: string
+                responses:
+                  '200':
+                    description: Successful response with distance
+                    content:
+                      application/json:
+                        schema:
+                          type: object
+                          properties:
+                            city1:
+                              type: object
+                              properties:
+                                name:
+                                  type: string
+                                latitude:
+                                  type: number
+                                longitude:
+                                  type: number
+                                country:
+                                  type: string
+                            city2:
+                              type: object
+                              properties:
+                                name:
+                                  type: string
+                                latitude:
+                                  type: number
+                                longitude:
+                                  type: number
+                                country:
+                                  type: string
+                            distance_km:
+                              type: number
+                              description: Distance in kilometers
+                            distance_miles:
+                              type: number
+                              description: Distance in miles
+          """
+          
+          def handler(event, context):
+              print(f"Event: {json.dumps(event, default=str)}")
+              
+              request_type = event['RequestType']
+              properties = event['ResourceProperties']
+              bucket_name = properties['BucketName']
+              
+              try:
+                  if request_type in ['Create', 'Update']:
+                      print(f"Uploading schema to s3://{bucket_name}/openapi_schema.yaml")
+                      s3.put_object(
+                          Bucket=bucket_name,
+                          Key='openapi_schema.yaml',
+                          Body=OPENAPI_SCHEMA.encode('utf-8'),
+                          ContentType='application/x-yaml'
+                      )
+                      print("Schema uploaded successfully")
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, 
+                                     {'SchemaKey': 'openapi_schema.yaml',
+                                      'BucketName': bucket_name})
+                  
+                  elif request_type == 'Delete':
+                      print(f"Deleting schema from s3://{bucket_name}/openapi_schema.yaml")
+                      try:
+                          s3.delete_object(Bucket=bucket_name, Key='openapi_schema.yaml')
+                          print("Schema deleted successfully")
+                      except Exception as e:
+                          print(f"Error deleting schema (continuing): {str(e)}")
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+              
+              except Exception as e:
+                  print(f"Error: {str(e)}")
+                  print(traceback.format_exc())
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': str(e)})
+      Tags:
+        - Key: Name
+          Value: !Sub '${AgentName}-upload-schema'
+        - Key: Environment
+          Value: !Ref Environment
+
+  UploadOpenAPISchema:
+    Type: Custom::UploadSchema
+    Properties:
+      ServiceToken: !GetAtt UploadSchemaFunction.Arn
+      BucketName: !Ref OpenAPIBucket
+    DependsOn: OpenAPIBucket
+    
   # ==================== CUSTOM RESOURCE LAMBDA ====================
   
   CustomResourceLambdaRole:
@@ -305,6 +561,10 @@ Resources:
                   - s3:GetObject
                   - s3:PutObject
                 Resource: !Sub '${OpenAPIBucket.Arn}/*'
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: !GetAtt OpenAPIBucket.Arn
       Tags:
         - Key: Name
           Value: !Sub '${AgentName}-custom-resource-role'
@@ -601,6 +861,7 @@ Resources:
       - CityCoordinatesFunction
       - LambdaBedrockPermission
       - OpenAPIBucket
+      - UploadOpenAPISchema
 
   # ==================== CLOUDWATCH ALARMS ====================
   

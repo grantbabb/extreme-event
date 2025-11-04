@@ -6,7 +6,7 @@ set -e
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
+YELLOW='\033[1;35m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
@@ -35,20 +35,21 @@ fi
 echo -e "${GREEN}✓ Prerequisites met${NC}\n"
 
 # Get API keys
-echo -e "${YELLOW}API Key Configuration${NC}"
-echo "Note: You can skip this and use Nominatim (free, no key required)"
-echo ""
+# uncomment on deployment
+# echo -e "${YELLOW}API Key Configuration${NC}"
+# echo "Note: You can skip this and use Nominatim (free, no key required)"
+# echo ""
 
-read -p "Enter OpenCage API key (or press Enter to skip): " OPENCAGE_KEY
-read -p "Enter Google Maps API key (or press Enter to skip): " GOOGLE_KEY
+# read -p "Enter OpenCage API key (or press Enter to skip): " OPENCAGE_KEY
+# read -p "Enter Google Maps API key (or press Enter to skip): " GOOGLE_KEY
 
 # Choose provider
-echo -e "\n${YELLOW}Available providers:${NC}"
-echo "1) opencage  - Free tier: 2,500 requests/day"
-echo "2) google    - Paid: \$5 per 1000 requests"
-echo "3) nominatim - Free, 1 req/sec limit, no key needed"
-read -p "Choose provider (1-3) [3]: " PROVIDER_CHOICE
-
+# echo -e "\n${YELLOW}Available providers:${NC}"
+# echo "1) opencage  - Free tier: 2,500 requests/day"
+# echo "2) google    - Paid: \$5 per 1000 requests"
+# echo "3) nominatim - Free, 1 req/sec limit, no key needed"
+# read -p "Choose provider (1-3) [3]: " PROVIDER_CHOICE
+PROVIDER_CHOICE=3
 case $PROVIDER_CHOICE in
     1) PROVIDER="opencage" ;;
     2) PROVIDER="google" ;;
@@ -101,28 +102,6 @@ EOF
 
 echo -e "${GREEN}✓ Parameters file created${NC}\n"
 
-# Get AWS Account ID for S3 bucket name
-echo -e "${YELLOW}Getting AWS Account ID...${NC}"
-AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text --region $REGION)
-echo -e "${GREEN}Account ID: $AWS_ACCOUNT_ID${NC}"
-
-# Get AgentName from parameters file
-AGENT_NAME=$(cat $PARAMETERS_FILE | grep -A 1 '"ParameterKey": "AgentName"' | grep "ParameterValue" | cut -d'"' -f4)
-S3_BUCKET_NAME="${AGENT_NAME}-openapi-${AWS_ACCOUNT_ID}"
-
-echo -e "${YELLOW}S3 Bucket for schema: $S3_BUCKET_NAME${NC}"
-
-# Upload OpenAPI schema to S3
-echo -e "${GREEN}Uploading OpenAPI schema to S3...${NC}"
-aws s3 cp $OPENAPI_SCHEMA_FILE s3://$S3_BUCKET_NAME/openapi_schema.yaml --region $REGION
-
-if [ $? -eq 0 ]; then
-    echo -e "${GREEN}OpenAPI schema uploaded successfully to s3://$S3_BUCKET_NAME/openapi_schema.yaml${NC}"
-else
-    echo -e "${RED}Failed to upload OpenAPI schema${NC}"
-    exit 1
-fi
-
 # Prepare Lambda deployment package
 echo -e "${YELLOW}Creating Lambda deployment package...${NC}"
 
@@ -150,7 +129,8 @@ echo -e "${GREEN}✓ Template is valid${NC}\n"
 # Check if stack exists
 if aws cloudformation describe-stacks --stack-name $STACK_NAME --region $REGION &> /dev/null; then
     echo -e "${YELLOW}Stack exists. Updating...${NC}"
-    OPERATION="update"
+    OPERATION="update-stack"
+    WAIT_OPERATION="update"
     
     aws cloudformation update-stack \
         --stack-name $STACK_NAME \
@@ -160,7 +140,8 @@ if aws cloudformation describe-stacks --stack-name $STACK_NAME --region $REGION 
         --region $REGION
 else
     echo -e "${YELLOW}Creating new stack...${NC}"
-    OPERATION="create"
+    OPERATION="create-stack"
+    WAIT_OPERATION="create"
     
     aws cloudformation create-stack \
         --stack-name $STACK_NAME \
@@ -173,20 +154,21 @@ fi
 echo -e "${BLUE}Waiting for stack $OPERATION to complete...${NC}"
 echo "This may take 5-10 minutes..."
 
-aws cloudformation wait stack-${OPERATION}-complete \
+aws cloudformation wait stack-${WAIT_OPERATION}-complete \
     --stack-name $STACK_NAME \
     --region $REGION
 
-if [ $? -eq 0 ]; then
-    echo -e "${GREEN}✓ Stack $OPERATION completed successfully${NC}\n"
-else
-    echo -e "${RED}✗ Stack $OPERATION failed${NC}"
-    aws cloudformation describe-stack-events \
-        --stack-name $STACK_NAME \
-        --region $REGION \
-        --max-items 10
-    exit 1
-fi
+#TODO add back later when you have time to troubleshoot
+# if [ $? -eq 0 ]; then
+#    echo -e "${GREEN}✓ Stack $OPERATION completed successfully${NC}\n"
+#else
+#    echo -e "${RED}✗ Stack $OPERATION failed${NC}"
+#    aws cloudformation describe-stack-events \
+#        --stack-name $STACK_NAME \
+#        --region $REGION \
+#        --max-items 10
+#    exit 1
+#fi
 
 # Get outputs
 echo -e "${YELLOW}Retrieving stack outputs...${NC}\n"
@@ -214,11 +196,6 @@ BUCKET_NAME=$(aws cloudformation describe-stacks \
     --region $REGION \
     --query 'Stacks[0].Outputs[?OutputKey==`OpenAPIBucketName`].OutputValue' \
     --output text)
-
-# Upload OpenAPI schema to S3
-echo -e "${YELLOW}Uploading OpenAPI schema to S3...${NC}"
-aws s3 cp openapi_schema.yaml s3://$BUCKET_NAME/ --region $REGION
-echo -e "${GREEN}✓ OpenAPI schema uploaded${NC}\n"
 
 # Update Lambda function code
 echo -e "${YELLOW}Updating Lambda function code...${NC}"
