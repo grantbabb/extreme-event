@@ -1,1 +1,6 @@
 poc/.ipynb_checkpoints/
+infrastructure/.ipynb_checkpoints/
+data/datasets/
+agent/.ipynb_checkpoints/
+agent.tar
+agent/lambda-deployment.zip
