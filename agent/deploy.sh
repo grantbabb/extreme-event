@@ -110,10 +110,9 @@ cp lambda_function.py lambda-package/
 
 # Install dependencies
 cd lambda-package
-pip install requests -t . --quiet
+pip install requests requests-aws4auth boto3 -t . --quiet
 zip -r ../lambda-deployment.zip . > /dev/null
 cd ..
-
 echo -e "${GREEN}✓ Lambda package created${NC}\n"
 
 # Validate CloudFormation template
