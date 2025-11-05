@@ -3,7 +3,7 @@ import json
 import os
 import requests
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 from decimal import Decimal
 from math import radians, sin, cos, sqrt, atan2
 
