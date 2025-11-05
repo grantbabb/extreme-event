@@ -363,11 +363,19 @@ Resources:
                             latitude:
                               type: number
                               format: double
-                              description: Latitude coordinate
+                              description: Latitude coordinate in decimal degrees
                             longitude:
                               type: number
                               format: double
-                              description: Longitude coordinate
+                              description: Longitude coordinate in decimal degrees
+                            scaled_latitude:
+                              type: integer
+                              format: int64
+                              description: Latitude scaled by 10^6 (for integer operations)
+                            scaled_longitude:
+                              type: integer
+                              format: int64
+                              description: Longitude scaled by 10^6 (for integer operations)
                             city:
                               type: string
                               description: City name
@@ -446,7 +454,15 @@ Resources:
                                   type: number
                                 longitude:
                                   type: number
+                                scaled_latitude:
+                                  type: integer
+                                  format: int64
+                                scaled_longitude:
+                                  type: integer
+                                  format: int64
                                 country:
+                                  type: string
+                                formatted_address:
                                   type: string
                             city2:
                               type: object
@@ -457,7 +473,15 @@ Resources:
                                   type: number
                                 longitude:
                                   type: number
+                                scaled_latitude:
+                                  type: integer
+                                  format: int64
+                                scaled_longitude:
+                                  type: integer
+                                  format: int64
                                 country:
+                                  type: string
+                                formatted_address:
                                   type: string
                             distance_km:
                               type: number
@@ -465,8 +489,7 @@ Resources:
                             distance_miles:
                               type: number
                               description: Distance in miles
-          """
-          
+          """          
           def handler(event, context):
               print(f"Event: {json.dumps(event, default=str)}")
               
@@ -827,12 +850,16 @@ Resources:
         
         Your capabilities:
         1. Look up coordinates for any city using authoritative geocoding APIs (OpenCage, Google Maps, or Nominatim)
-        2. Provide detailed location information including country, state/region, and formatted address
-        3. Calculate straight-line distances between two cities in both kilometers and miles
-        4. Handle ambiguous city names by providing context or asking for clarification
+        2. Provide coordinates in both decimal degrees (float) and scaled integer format (multiplied by 10^6)
+        3. Provide detailed location information including country, state/region, and formatted address
+        4. Calculate straight-line distances between two cities in both kilometers and miles
+        5. Handle ambiguous city names by providing context or asking for clarification
         
         When responding to coordinate requests:
         - Always provide coordinates with at least 4 decimal places for accuracy (e.g., 40.7128°N, 74.0060°W)
+        - Include both decimal and scaled integer formats:
+          * Decimal: 45.5152° N, 122.6784° W
+          * Scaled: 45515200, -122678400 (useful for integer-based calculations)
         - Include the data source and confidence level when available
         - Always mention the country to avoid confusion with cities of the same name
         - For distance calculations, clarify that it's straight-line distance (as the crow flies), not driving distance
@@ -846,16 +873,24 @@ Resources:
         
         Example response format:
         "I found the coordinates for Tokyo, Japan:
+        
+        Decimal Format:
         • Latitude: 35.6762°N
         • Longitude: 139.6503°E
+        
+        Integer Format (scaled by 10^6):
+        • Latitude: 35676200
+        • Longitude: 139650300
+        
+        Additional Information:
         • Country: Japan
         • Formatted Address: Tokyo, Japan
-        • Timezone: Asia/Tokyo
         • Data Source: [API name]
+        
+        The scaled integer format is useful for systems that work with integer coordinates.
         
         Is there anything else you'd like to know about this location?"
         
-        For distance queries, include both the coordinates and the calculated distance with direction.
     DependsOn:
       - BedrockAgentRole
       - CityCoordinatesFunction
