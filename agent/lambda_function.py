@@ -115,7 +115,7 @@ def get_coordinates(city: str, state: Optional[str] = None,
 
 # ==================== GEOCODING PROVIDERS ====================
 
-def get_coordinates_opencage(city_name: str) -> Optional[Dict]:
+def geocode_opencage(city_name: str) -> Optional[Dict]:
     """
     Get coordinates using OpenCage Geocoding API
     Free tier: 2,500 requests/day
@@ -182,7 +182,7 @@ def get_coordinates_opencage(city_name: str) -> Optional[Dict]:
         log('ERROR', f'OpenCage processing error: {str(e)}')
         return None
 
-def get_coordinates_google(city_name: str) -> Optional[Dict]:
+def geocode_google(city_name: str) -> Optional[Dict]:
     """
     Get coordinates using Google Maps Geocoding API
     Pricing: $5 per 1000 requests (after $200 monthly credit)
@@ -252,7 +252,7 @@ def get_coordinates_google(city_name: str) -> Optional[Dict]:
         log('ERROR', f'Google Maps processing error: {str(e)}')
         return None
 
-def get_coordinates_nominatim(city_name: str) -> Optional[Dict]:
+def geocode_nominatim(city_name: str) -> Optional[Dict]:
     """
     Get coordinates using Nominatim (OpenStreetMap) - FREE
     Rate limit: 1 request per second
@@ -436,29 +436,34 @@ def get_nearest_graph_vertices(city: str, state: Optional[str] = None,
                                country: Optional[str] = None,
                                limit: int = 2) -> Dict[str, Any]:
     """Find nearest graph vertices to a city's coordinates."""
-    coords = get_coordinates(city, state, country)
-
-    if 'error' in coords:
-        return coords
+    #coords = get_coordinates(city, state, country)
+    #if 'error' in coords:
+    #    return coords
 
     try:
+        #nearest = find_nearest_vertices(
+        #    coords['scaled_latitude'],
+        #    coords['scaled_longitude'],
+        #    limit
+        #)
         nearest = find_nearest_vertices(
-            coords['scaled_latitude'],
-            coords['scaled_longitude'],
-            limit
+            45520247,  #coords['scaled_latitude'],
+            -122674194, #coords['scaled_longitude'],
+            2 #limit
         )
+        print(nearest)
 
         return {
-            'query_location': {
-                'city': city,
-                'state': state,
-                'country': country,
-                'latitude': coords['latitude'],
-                'longitude': coords['longitude'],
-                'scaled_latitude': coords['scaled_latitude'],
-                'scaled_longitude': coords['scaled_longitude'],
-                'formatted_address': coords.get('formatted_address', '')
-            },
+        #    'query_location': {
+        #        'city': city,
+        #        'state': state,
+        #        'country': country,
+        #        'latitude': coords['latitude'],
+        #        'longitude': coords['longitude'],
+        #        'scaled_latitude': coords['scaled_latitude'],
+        #        'scaled_longitude': coords['scaled_longitude'],
+        #        'formatted_address': coords.get('formatted_address', '')
+        #    },
             'nearest_vertices': nearest,
             'count': len(nearest)
         }
@@ -638,25 +643,29 @@ if __name__ == "__main__":
     
     # Test event for single city
     test_event_single = {
-        "messageVersion": "1.0",
-        "agent": {
-            "name": "city-coordinates-agent",
-            "version": "DRAFT",
-            "id": "TEST123",
-            "alias": "TSTALIASID"
+      "actionGroup": "CityCoordinatesActions",
+      "apiPath": "/nearest-vertices",
+      "httpMethod": "get",
+      "parameters": [
+        {
+          "name": "city",
+          "value": "portland"
         },
-        "actionGroup": "CityCoordinatesActions",
-        "apiPath": "/getCityCoordinates",
-        "httpMethod": "GET",
-        "parameters": [
-            {
-                "name": "cityName",
-                "type": "string",
-                "value": "Tokyo"
-            }
-        ]
+        {
+          "name": "state",
+          "value": "oregon"
+        },
+        {
+          "name": "country",
+          "value": "usa"
+        },
+        {
+          "name": "limit",
+          "value": 3
+        }
+      ]
     }
-    
+
     # Test event for two cities
     test_event_two = {
         "messageVersion": "1.0",
@@ -713,7 +722,7 @@ if __name__ == "__main__":
  #   print("\n" + "="*80)
  #   print("Testing Single City Lookup")
  #   print("="*80)
- #   result1 = lambda_handler(test_event_single, MockContext())
+    result1 = lambda_handler(test_event_single, MockContext())
  #   print(json.dumps(result1, indent=2, cls=DecimalEncoder))
  #   
  #   print("\n" + "="*80)

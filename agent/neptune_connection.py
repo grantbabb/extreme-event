@@ -5,16 +5,17 @@ import logging
 import requests
 from typing import Dict, Any, List, Optional
 # import json
-from requests_aws4auth import AWS4Auth
+#from requests_aws4auth import AWS4Auth
+from requests_auth_aws_sigv4 import AWSSigV4
 import boto3
 
 logger = logging.getLogger()
 logger.setLevel(os.getenv('LOG_LEVEL', 'INFO'))
 
 # Neptune configuration from environment
-NEPTUNE_ENDPOINT = os.getenv('NEPTUNE_ENDPOINT', '')
+NEPTUNE_ENDPOINT = os.getenv('NEPTUNE_ENDPOINT', 'db-neptune-dev.cluster-criq8uemaejw.us-west-2.neptune.amazonaws.com')
 NEPTUNE_PORT = int(os.getenv('NEPTUNE_PORT', '8182'))
-NEPTUNE_USE_IAM = os.getenv('NEPTUNE_USE_IAM', 'true').lower() == 'true'
+NEPTUNE_USE_IAM = os.getenv('NEPTUNE_USE_IAM', 'True')#.lower() == 'true'
 
 
 class NeptuneConnection:
@@ -23,7 +24,9 @@ class NeptuneConnection:
     def __init__(self):
         self._session = None
         self._auth = None
-        self._base_url = None
+        # Create base URL for OpenCypher endpoint
+        self._protocol = 'https' if NEPTUNE_USE_IAM else 'http'
+        self._base_url = f"{self._protocol}://{NEPTUNE_ENDPOINT}:{NEPTUNE_PORT}/openCypher"
 
     def __enter__(self):
         """Context manager entry"""
@@ -44,29 +47,14 @@ class NeptuneConnection:
 
         try:
             # Create base URL for OpenCypher endpoint
-            protocol = 'https' if NEPTUNE_USE_IAM else 'http'
-            self._base_url = f"{protocol}://{NEPTUNE_ENDPOINT}:{NEPTUNE_PORT}/openCypher"
 
             logger.info(f"Connecting to Neptune OpenCypher at {self._base_url}")
 
-            # Create session
-            self._session = requests.Session()
-
             # Setup IAM authentication if needed
             if NEPTUNE_USE_IAM:
-                credentials = boto3.Session().get_credentials()
                 region = os.getenv('AWS_REGION', 'us-west-2')
-                self._auth = AWS4Auth(
-                    credentials.access_key,
-                    credentials.secret_key,
-                    region,
-                    'neptune-db',
-                    session_token=credentials.token
-                )
-
-            # Test connection with a simple query
-            test_result = self.execute_query("MATCH (n) RETURN count(n) as count LIMIT 1")
-            logger.info(f"Successfully connected to Neptune. Test query result: {test_result}")
+                service = "neptune-db"
+                self._auth = AWSSigV4(service, region=region)
 
         except Exception as e:
             logger.error(f"Failed to connect to Neptune: {str(e)}", exc_info=True)
@@ -103,32 +91,31 @@ class NeptuneConnection:
             if parameters:
                 logger.info(f"With parameters: {parameters}")
 
-            # Prepare request payload
+         # Prepare request payload
             payload = {'query': query}
             if parameters:
                 payload['parameters'] = parameters
 
             # Execute query
             headers = {'Content-Type': 'application/json'}
-
             if NEPTUNE_USE_IAM:
-                response = self._session.post(
+                response = requests.post(
                     self._base_url,
                     json=payload,
                     headers=headers,
                     auth=self._auth,
-                    timeout=30
+                    timeout=300
                 )
             else:
-                response = self._session.post(
+                response = requests.post(
                     self._base_url,
                     json=payload,
                     headers=headers,
-                    timeout=30
+                    timeout=180
                 )
 
             # Check for errors
-            response.raise_for_status()
+            # print(response.status_code)
 
             # Parse results
             result_data = response.json()
@@ -146,7 +133,7 @@ class NeptuneConnection:
             logger.error(f"HTTP request error: {str(e)}", exc_info=True)
             if hasattr(e.response, 'text'):
                 logger.error(f"Response: {e.response.text}")
-            raise
+                raise
         except Exception as e:
             logger.error(f"Query execution error: {str(e)}", exc_info=True)
             raise
@@ -167,26 +154,25 @@ def find_nearest_vertices(scaled_lat: int, scaled_lon: int, limit: int = 2) -> L
         # OpenCypher query to find nearest vertices
         # Using Manhattan distance for performance
         query = """
-        MATCH (n)
-        WHERE n.scaled_latitude IS NOT NULL 
-          AND n.scaled_longitude IS NOT NULL
-        WITH n,
-             abs(n.scaled_latitude - $target_lat) + abs(n.scaled_longitude - $target_lon) AS distance
-        ORDER BY distance ASC
-        LIMIT $limit
-        RETURN 
-            id(n) AS vertex_id,
-            labels(n) AS vertex_labels,
-            n.scaled_latitude AS scaled_latitude,
-            n.scaled_longitude AS scaled_longitude,
-            distance,
-            properties(n) AS properties
-        """
-
+            MATCH (n)
+            WHERE n.latitude IS NOT NULL
+              AND n.longitude IS NOT NULL
+            WITH n,
+                 abs(n.latitude - $target_lat) + abs(n.longitude - $target_lon) AS distance
+            ORDER BY distance ASC
+            LIMIT $limit
+            RETURN 
+                id(n) AS vertex_id,
+                labels(n) AS vertex_labels,
+                n.latitude AS scaled_latitude,
+                n.longitude AS scaled_longitude,
+                distance,
+                properties(n) AS properties
+            """
         parameters = {
-            'target_lat': scaled_lat,
-            'target_lon': scaled_lon,
-            'limit': limit
+            "target_lat": scaled_lat,
+            "target_lon": scaled_lon,
+            "limit": limit
         }
 
         try:
@@ -394,16 +380,22 @@ def test_connection() -> Dict[str, Any]:
             edge_count = edge_count_result[0].get('count', 0) if edge_count_result else 0
 
             # Get vertex labels
-            labels_query = "MATCH (n) RETURN DISTINCT labels(n) AS labels LIMIT 10"
-            labels_result = conn.execute_query(labels_query)
-            labels = [r.get('labels', []) for r in labels_result]
+            # ISSUE: something wrong with this query
+            #labels_query = "MATCH (n) RETURN DISTINCT labels(n) AS labels LIMIT 10"
+            #labels_result = conn.execute_query(labels_query)
+            #labels = [r.get('labels', []) for r in labels_result]
             # Flatten and deduplicate labels
-            all_labels = list(set([label for sublist in labels for label in sublist]))
+            #all_labels = list(set([label for sublist in labels for label in sublist]))
 
             # Get relationship types
             rel_types_query = "MATCH ()-[r]->() RETURN DISTINCT type(r) AS type LIMIT 10"
             rel_types_result = conn.execute_query(rel_types_query)
             rel_types = [r.get('type') for r in rel_types_result if r.get('type')]
+
+            # Get nearest vertes
+            nearest_vx_query = find_nearest_vertices(45520247, -122674194, 3)
+            print(nearest_vx_query)
+            # nearest_vx = [r.get('type') for r in rel_types_result if r.get('type')]
 
             return {
                 'status': 'connected',
@@ -413,7 +405,7 @@ def test_connection() -> Dict[str, Any]:
                 'iam_auth': NEPTUNE_USE_IAM,
                 'vertex_count': vertex_count,
                 'edge_count': edge_count,
-                'vertex_labels': all_labels,
+                #'vertex_labels': all_labels,
                 'relationship_types': rel_types
             }
 
