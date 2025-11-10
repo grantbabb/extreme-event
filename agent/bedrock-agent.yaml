@@ -123,6 +123,11 @@ Resources:
             Principal:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
+          - Effect: Allow
+            Sid: NeptuneAccess
+            Principal: 
+              Service: rds.amazonaws.com
+            Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Tags:
@@ -323,32 +328,32 @@ Resources:
           
           OPENAPI_SCHEMA = """openapi: 3.0.0
           info:
-            title: City Coordinates API
-            version: 1.0.0
-            description: API for retrieving city coordinates and calculating distances between cities
+            title: City Coordinates and Graph API
+            version: 2.0.0
+            description: API for geocoding, distance calculation, and Neptune graph queries using OpenCypher
           
           paths:
             /coordinates:
               get:
                 summary: Get coordinates for a city
-                description: Retrieves latitude and longitude coordinates for a specified city
+                description: Retrieves latitude and longitude coordinates for a specified city using geocoding APIs
                 operationId: getCoordinates
                 parameters:
                   - name: city
                     in: query
-                    description: Name of the city (e.g., "Portland")
+                    description: Name of the city (e.g., "Portland", "Tokyo")
                     required: true
                     schema:
                       type: string
                   - name: state
                     in: query
-                    description: State or province (optional, e.g., "Oregon")
+                    description: State or province name (optional, e.g., "Oregon", "California")
                     required: false
                     schema:
                       type: string
                   - name: country
                     in: query
-                    description: Country name or code (optional, e.g., "USA")
+                    description: Country name or code (optional, e.g., "USA", "Japan")
                     required: false
                     schema:
                       type: string
@@ -358,138 +363,489 @@ Resources:
                     content:
                       application/json:
                         schema:
-                          type: object
-                          properties:
-                            latitude:
-                              type: number
-                              format: double
-                              description: Latitude coordinate in decimal degrees
-                            longitude:
-                              type: number
-                              format: double
-                              description: Longitude coordinate in decimal degrees
-                            scaled_latitude:
-                              type: integer
-                              format: int64
-                              description: Latitude scaled by 10^6 (for integer operations)
-                            scaled_longitude:
-                              type: integer
-                              format: int64
-                              description: Longitude scaled by 10^6 (for integer operations)
-                            city:
-                              type: string
-                              description: City name
-                            country:
-                              type: string
-                              description: Country name
-                            state:
-                              type: string
-                              description: State or region
-                            formatted_address:
-                              type: string
-                              description: Full formatted address
-                            data_source:
-                              type: string
-                              description: Geocoding provider used
-                            confidence:
-                              type: number
-                              description: Confidence level (0-10)
+                          $ref: '#/components/schemas/CoordinateResponse'
             
             /distance:
               get:
                 summary: Calculate distance between two cities
-                description: Calculates the straight-line distance between two cities
+                description: Calculates the straight-line distance between two cities using the Haversine formula
                 operationId: calculateDistance
                 parameters:
                   - name: city1
                     in: query
-                    description: First city name
+                    description: Name of the first city
                     required: true
                     schema:
                       type: string
                   - name: city2
                     in: query
-                    description: Second city name
+                    description: Name of the second city
                     required: true
                     schema:
                       type: string
                   - name: state1
                     in: query
-                    description: State for first city (optional)
+                    description: State or province for the first city (optional)
                     required: false
                     schema:
                       type: string
                   - name: state2
                     in: query
-                    description: State for second city (optional)
+                    description: State or province for the second city (optional)
                     required: false
                     schema:
                       type: string
                   - name: country1
                     in: query
-                    description: Country for first city (optional)
+                    description: Country for the first city (optional)
                     required: false
                     schema:
                       type: string
                   - name: country2
                     in: query
-                    description: Country for second city (optional)
+                    description: Country for the second city (optional)
                     required: false
                     schema:
                       type: string
                 responses:
                   '200':
-                    description: Successful response with distance
+                    description: Successful response with distance calculations
                     content:
                       application/json:
                         schema:
+                          $ref: '#/components/schemas/DistanceResponse'
+            
+            /nearest-vertices:
+              get:
+                summary: Find nearest graph vertices to a city
+                description: Queries Neptune graph database using OpenCypher to find vertices nearest to a city's coordinates based on scaled latitude and longitude
+                operationId: getNearestVertices
+                parameters:
+                  - name: city
+                    in: query
+                    description: Name of the city to search near
+                    required: true
+                    schema:
+                      type: string
+                  - name: state
+                    in: query
+                    description: State or province (optional, helps disambiguate city names)
+                    required: false
+                    schema:
+                      type: string
+                  - name: country
+                    in: query
+                    description: Country name (optional, helps disambiguate city names)
+                    required: false
+                    schema:
+                      type: string
+                  - name: limit
+                    in: query
+                    description: Maximum number of nearest vertices to return (default is 2, maximum is 10)
+                    required: false
+                    schema:
+                      type: integer
+                      minimum: 1
+                      maximum: 10
+                      default: 2
+                responses:
+                  '200':
+                    description: Successful response with nearest vertices
+                    content:
+                      application/json:
+                        schema:
+                          $ref: '#/components/schemas/NearestVerticesResponse'
+            
+            /vertex:
+              get:
+                summary: Get a specific vertex by ID
+                description: Retrieves detailed information about a specific vertex from the Neptune graph database
+                operationId: getVertex
+                parameters:
+                  - name: vertex_id
+                    in: query
+                    description: The unique identifier of the vertex to retrieve
+                    required: true
+                    schema:
+                      type: string
+                responses:
+                  '200':
+                    description: Successful response with vertex details
+                    content:
+                      application/json:
+                        schema:
+                          $ref: '#/components/schemas/VertexResponse'
+            
+            /path:
+              get:
+                summary: Find shortest path between two vertices
+                description: Uses OpenCypher shortestPath algorithm to find the shortest path between two vertices in the graph
+                operationId: findPath
+                parameters:
+                  - name: start_vertex_id
+                    in: query
+                    description: The unique identifier of the starting vertex
+                    required: true
+                    schema:
+                      type: string
+                  - name: end_vertex_id
+                    in: query
+                    description: The unique identifier of the ending vertex
+                    required: true
+                    schema:
+                      type: string
+                  - name: max_hops
+                    in: query
+                    description: Maximum path length to search (number of edges, default is 5, maximum is 10)
+                    required: false
+                    schema:
+                      type: integer
+                      minimum: 1
+                      maximum: 10
+                      default: 5
+                responses:
+                  '200':
+                    description: Successful response with path information
+                    content:
+                      application/json:
+                        schema:
+                          $ref: '#/components/schemas/PathResponse'
+            
+            /neighbors:
+              get:
+                summary: Get neighboring vertices
+                description: Retrieves vertices that are directly connected to a specified vertex through relationships
+                operationId: getNeighbors
+                parameters:
+                  - name: vertex_id
+                    in: query
+                    description: The unique identifier of the vertex whose neighbors to retrieve
+                    required: true
+                    schema:
+                      type: string
+                  - name: relationship_type
+                    in: query
+                    description: Filter neighbors by specific relationship type (optional, e.g., CONNECTED_TO, LOCATED_IN)
+                    required: false
+                    schema:
+                      type: string
+                  - name: direction
+                    in: query
+                    description: Direction of relationships to follow - outgoing (vertex points to neighbors), incoming (neighbors point to vertex), or both
+                    required: false
+                    schema:
+                      type: string
+                      enum: [outgoing, incoming, both]
+                      default: both
+                  - name: limit
+                    in: query
+                    description: Maximum number of neighbors to return (default is 10, maximum is 50)
+                    required: false
+                    schema:
+                      type: integer
+                      minimum: 1
+                      maximum: 50
+                      default: 10
+                responses:
+                  '200':
+                    description: Successful response with neighbor vertices
+                    content:
+                      application/json:
+                        schema:
+                          $ref: '#/components/schemas/NeighborsResponse'
+            
+            /test-connection:
+              get:
+                summary: Test Neptune database connection
+                description: Verifies connectivity to the Neptune database and returns statistics about the graph including vertex count, edge count, and available labels
+                operationId: testConnection
+                responses:
+                  '200':
+                    description: Connection test results with database statistics
+                    content:
+                      application/json:
+                        schema:
+                          $ref: '#/components/schemas/ConnectionTestResponse'
+          
+          components:
+            schemas:
+              CoordinateResponse:
+                type: object
+                properties:
+                  latitude:
+                    type: number
+                    format: double
+                    description: Latitude in decimal degrees
+                  longitude:
+                    type: number
+                    format: double
+                    description: Longitude in decimal degrees
+                  scaled_latitude:
+                    type: integer
+                    format: int64
+                    description: Latitude scaled by 10^6 for integer operations
+                  scaled_longitude:
+                    type: integer
+                    format: int64
+                    description: Longitude scaled by 10^6 for integer operations
+                  city:
+                    type: string
+                    description: City name
+                  country:
+                    type: string
+                    description: Country name
+                  state:
+                    type: string
+                    description: State or province name
+                  formatted_address:
+                    type: string
+                    description: Full formatted address
+                  data_source:
+                    type: string
+                    description: Geocoding provider used (nominatim, opencage, or google)
+                  confidence:
+                    type: number
+                    description: Confidence score from geocoding provider (0-10)
+              
+              DistanceResponse:
+                type: object
+                properties:
+                  city1:
+                    $ref: '#/components/schemas/CityInfo'
+                  city2:
+                    $ref: '#/components/schemas/CityInfo'
+                  distance_km:
+                    type: number
+                    description: Distance in kilometers
+                  distance_miles:
+                    type: number
+                    description: Distance in miles
+              
+              CityInfo:
+                type: object
+                properties:
+                  name:
+                    type: string
+                    description: City name
+                  latitude:
+                    type: number
+                    description: Latitude in decimal degrees
+                  longitude:
+                    type: number
+                    description: Longitude in decimal degrees
+                  scaled_latitude:
+                    type: integer
+                    description: Latitude scaled by 10^6
+                  scaled_longitude:
+                    type: integer
+                    description: Longitude scaled by 10^6
+                  country:
+                    type: string
+                    description: Country name
+                  formatted_address:
+                    type: string
+                    description: Full formatted address
+              
+              NearestVerticesResponse:
+                type: object
+                properties:
+                  query_location:
+                    type: object
+                    description: Information about the queried location
+                    properties:
+                      city:
+                        type: string
+                      state:
+                        type: string
+                      country:
+                        type: string
+                      latitude:
+                        type: number
+                      longitude:
+                        type: number
+                      scaled_latitude:
+                        type: integer
+                      scaled_longitude:
+                        type: integer
+                      formatted_address:
+                        type: string
+                  nearest_vertices:
+                    type: array
+                    description: List of nearest vertices ordered by distance
+                    items:
+                      $ref: '#/components/schemas/GraphVertex'
+                  count:
+                    type: integer
+                    description: Number of vertices returned
+              
+              GraphVertex:
+                type: object
+                properties:
+                  vertex_id:
+                    type: string
+                    description: Unique vertex identifier
+                  vertex_labels:
+                    type: array
+                    description: List of labels assigned to this vertex
+                    items:
+                      type: string
+                  vertex_label:
+                    type: string
+                    description: Primary label of the vertex
+                  latitude:
+                    type: number
+                    description: Latitude in decimal degrees
+                  longitude:
+                    type: number
+                    description: Longitude in decimal degrees
+                  scaled_latitude:
+                    type: integer
+                    description: Latitude scaled by 10^6
+                  scaled_longitude:
+                    type: integer
+                    description: Longitude scaled by 10^6
+                  manhattan_distance:
+                    type: number
+                    description: Manhattan distance from query point
+                  properties:
+                    type: object
+                    description: All properties of the vertex
+                    additionalProperties: true
+              
+              VertexResponse:
+                type: object
+                properties:
+                  vertex_id:
+                    type: string
+                    description: Unique vertex identifier
+                  vertex_labels:
+                    type: array
+                    description: List of labels assigned to this vertex
+                    items:
+                      type: string
+                  vertex_label:
+                    type: string
+                    description: Primary label of the vertex
+                  properties:
+                    type: object
+                    description: All properties of the vertex
+                    additionalProperties: true
+              
+              PathResponse:
+                type: object
+                properties:
+                  nodes:
+                    type: array
+                    description: Ordered list of vertices in the path
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        labels:
+                          type: array
+                          items:
+                            type: string
+                        properties:
                           type: object
-                          properties:
-                            city1:
-                              type: object
-                              properties:
-                                name:
-                                  type: string
-                                latitude:
-                                  type: number
-                                longitude:
-                                  type: number
-                                scaled_latitude:
-                                  type: integer
-                                  format: int64
-                                scaled_longitude:
-                                  type: integer
-                                  format: int64
-                                country:
-                                  type: string
-                                formatted_address:
-                                  type: string
-                            city2:
-                              type: object
-                              properties:
-                                name:
-                                  type: string
-                                latitude:
-                                  type: number
-                                longitude:
-                                  type: number
-                                scaled_latitude:
-                                  type: integer
-                                  format: int64
-                                scaled_longitude:
-                                  type: integer
-                                  format: int64
-                                country:
-                                  type: string
-                                formatted_address:
-                                  type: string
-                            distance_km:
-                              type: number
-                              description: Distance in kilometers
-                            distance_miles:
-                              type: number
-                              description: Distance in miles
-          """          
+                  relationships:
+                    type: array
+                    description: Ordered list of relationships connecting the vertices
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        type:
+                          type: string
+                        properties:
+                          type: object
+                  path_length:
+                    type: integer
+                    description: Number of edges in the path
+                  start_id:
+                    type: string
+                    description: Starting vertex ID
+                  end_id:
+                    type: string
+                    description: Ending vertex ID
+              
+              NeighborsResponse:
+                type: object
+                properties:
+                  vertex_id:
+                    type: string
+                    description: The vertex whose neighbors were queried
+                  relationship_type:
+                    type: string
+                    description: Relationship type filter applied (if any)
+                  direction:
+                    type: string
+                    description: Direction of relationships queried
+                  neighbors:
+                    type: array
+                    description: List of neighboring vertices
+                    items:
+                      type: object
+                      properties:
+                        vertex_id:
+                          type: string
+                        vertex_labels:
+                          type: array
+                          items:
+                            type: string
+                        vertex_label:
+                          type: string
+                        properties:
+                          type: object
+                        relationship_type:
+                          type: string
+                        relationship_properties:
+                          type: object
+                  count:
+                    type: integer
+                    description: Number of neighbors returned
+              
+              ConnectionTestResponse:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    description: Connection status (connected, failed, or error)
+                    enum: [connected, failed, error]
+                  endpoint:
+                    type: string
+                    description: Neptune endpoint address
+                  port:
+                    type: integer
+                    description: Neptune port number
+                  query_language:
+                    type: string
+                    description: Query language being used (OpenCypher)
+                  iam_auth:
+                    type: boolean
+                    description: Whether IAM authentication is enabled
+                  vertex_count:
+                    type: integer
+                    description: Total number of vertices in the graph
+                  edge_count:
+                    type: integer
+                    description: Total number of edges in the graph
+                  vertex_labels:
+                    type: array
+                    description: List of available vertex labels
+                    items:
+                      type: string
+                  relationship_types:
+                    type: array
+                    description: List of available relationship types
+                    items:
+                      type: string
+                  error:
+                    type: string
+                    description: Error message if connection failed
+          """
+          
           def handler(event, context):
               print(f"Event: {json.dumps(event, default=str)}")
               
@@ -599,6 +955,7 @@ Resources:
     Properties:
       LogGroupName: !Sub '/aws/lambda/${AgentName}-custom-resource'
       # RetentionInDays: !Ref LogRetentionDays
+      DeletionPolicy: Retain
 
   BedrockAgentCustomResourceFunction:
     Type: AWS::Lambda::Function
@@ -759,13 +1116,13 @@ Resources:
                   alias_arn = None
                   if aliases.get('agentAliasSummaries'):
                       alias_id = aliases['agentAliasSummaries'][0]['agentAliasId']
-                      alias_arn = aliases['agentAliasSummaries'][0]['agentAliasArn']
+                      # alias_arn = aliases['agentAliasSummaries'][0]['agentAliasArn']
                   
                   return {
                       'AgentId': agent_id,
                       'AgentArn': agent['agent']['agentArn'],
                       'AliasId': alias_id,
-                      'AliasArn': alias_arn,
+                      # 'AliasArn': alias_arn,
                       'Message': 'Agent updated successfully'
                   }
               
@@ -845,51 +1202,53 @@ Resources:
       IdleSessionTTL: !Ref IdleSessionTTL
       Description: !Sub 'City coordinates geocoding agent for ${Environment} environment'
       Instruction: |
-        You are a professional geographic information assistant that helps users find accurate latitude 
-        and longitude coordinates for cities worldwide.
+        You are a professional geographic information assistant with access to a Neptune graph database 
+        that you can query using OpenCypher.
         
         Your capabilities:
-        1. Look up coordinates for any city using authoritative geocoding APIs (OpenCage, Google Maps, or Nominatim)
-        2. Provide coordinates in both decimal degrees (float) and scaled integer format (multiplied by 10^6)
-        3. Provide detailed location information including country, state/region, and formatted address
-        4. Calculate straight-line distances between two cities in both kilometers and miles
-        5. Handle ambiguous city names by providing context or asking for clarification
+        1. Look up coordinates for any city using authoritative geocoding APIs
+        2. Provide coordinates in both decimal degrees and scaled integer format
+        3. Calculate straight-line distances between cities
+        4. Query a Neptune graph database using OpenCypher to:
+           - Find vertices nearest to geographic coordinates
+           - Retrieve specific vertices by ID
+           - Find shortest paths between vertices
+           - Get neighboring vertices and their relationships
+        5. Handle ambiguous city names by providing context
         
-        When responding to coordinate requests:
-        - Always provide coordinates with at least 4 decimal places for accuracy (e.g., 40.7128°N, 74.0060°W)
-        - Include both decimal and scaled integer formats:
-          * Decimal: 45.5152° N, 122.6784° W
-          * Scaled: 45515200, -122678400 (useful for integer-based calculations)
-        - Include the data source and confidence level when available
-        - Always mention the country to avoid confusion with cities of the same name
-        - For distance calculations, clarify that it's straight-line distance (as the crow flies), not driving distance
-        - If a city cannot be found, politely suggest checking the spelling or providing more context (like state or country)
+        Graph Database Features:
+        - Uses OpenCypher query language (same as Neo4j)
+        - Vertices have scaled_latitude and scaled_longitude properties for spatial queries
+        - Support for relationship traversal and pattern matching
+        - Can find paths up to 10 hops
         
-        Response format guidelines:
-        - Be conversational, helpful, and accurate
-        - Present data in a clear, organized format
-        - Use bullet points or structured formatting for multiple data points
-        - Include relevant context (timezone, country, region) when helpful
+        When responding to queries:
+        - Always provide clear, structured information
+        - For graph queries, explain what vertices and relationships represent
+        - Include both coordinates and graph data when relevant
+        - Mention the query language (OpenCypher) when discussing graph operations
         
-        Example response format:
-        "I found the coordinates for Tokyo, Japan:
+        Example graph query response:
+        "I found the 2 nearest vertices in the graph database to Portland, Oregon:
         
-        Decimal Format:
-        • Latitude: 35.6762°N
-        • Longitude: 139.6503°E
+        Query Location:
+        • Portland, Oregon
+        • Coordinates: 45.5152°N, 122.6784°W
+        • Scaled: 45515200, -122678400
         
-        Integer Format (scaled by 10^6):
-        • Latitude: 35676200
-        • Longitude: 139650300
+        Nearest Vertices:
+        1. Vertex ID: location-123
+           • Labels: City, Location
+           • Distance: 156 units (Manhattan distance)
+           • Properties: {name: 'Portland Metro', population: 2000000}
         
-        Additional Information:
-        • Country: Japan
-        • Formatted Address: Tokyo, Japan
-        • Data Source: [API name]
-        
-        The scaled integer format is useful for systems that work with integer coordinates.
-        
-        Is there anything else you'd like to know about this location?"
+        2. Vertex ID: location-456
+           • Labels: City
+           • Distance: 423 units
+           • Properties: {name: 'Salem', population: 175000}
+           
+        These distances are calculated using Manhattan distance on scaled coordinates.
+        Would you like to explore relationships or paths between these vertices?"
         
     DependsOn:
       - BedrockAgentRole

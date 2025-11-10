@@ -7,6 +7,16 @@ from typing import Dict, Any, Optional, Tuple
 from decimal import Decimal
 from math import radians, sin, cos, sqrt, atan2
 
+# Import Neptune functions
+from neptune_connection import (
+    find_nearest_vertices, 
+    get_vertex_by_id,
+    find_path_between_vertices,
+    get_vertex_neighbors,
+    test_connection,
+    NeptuneConnection
+)
+
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(os.getenv('LOG_LEVEL', 'INFO'))
@@ -17,12 +27,14 @@ GOOGLE_MAPS_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY', '')
 GEOCODING_PROVIDER = os.environ.get('GEOCODING_PROVIDER', 'nominatim')
 LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO')
 
+
 class DecimalEncoder(json.JSONEncoder):
     """Handle Decimal types in JSON serialization"""
     def default(self, obj):
         if isinstance(obj, Decimal):
             return float(obj)
         return super(DecimalEncoder, self).default(obj)
+
 
 def log(level: str, message: str, data: Any = None):
     """Simple logging function"""
@@ -103,7 +115,7 @@ def get_coordinates(city: str, state: Optional[str] = None,
 
 # ==================== GEOCODING PROVIDERS ====================
 
-def get_coordinates_opencage(city_name: str) -> Optional[Dict]:
+def geocode_opencage(city_name: str) -> Optional[Dict]:
     """
     Get coordinates using OpenCage Geocoding API
     Free tier: 2,500 requests/day
@@ -170,7 +182,7 @@ def get_coordinates_opencage(city_name: str) -> Optional[Dict]:
         log('ERROR', f'OpenCage processing error: {str(e)}')
         return None
 
-def get_coordinates_google(city_name: str) -> Optional[Dict]:
+def geocode_google(city_name: str) -> Optional[Dict]:
     """
     Get coordinates using Google Maps Geocoding API
     Pricing: $5 per 1000 requests (after $200 monthly credit)
@@ -240,7 +252,7 @@ def get_coordinates_google(city_name: str) -> Optional[Dict]:
         log('ERROR', f'Google Maps processing error: {str(e)}')
         return None
 
-def get_coordinates_nominatim(city_name: str) -> Optional[Dict]:
+def geocode_nominatim(city_name: str) -> Optional[Dict]:
     """
     Get coordinates using Nominatim (OpenStreetMap) - FREE
     Rate limit: 1 request per second
@@ -358,6 +370,7 @@ def get_coordinates_with_fallback(city_name: str) -> Dict:
 
 # ==================== DISTANCE CALCULATION ====================
 
+
 def calculate_distance(city1: str, city2: str, 
                       state1: Optional[str] = None, 
                       state2: Optional[str] = None,
@@ -370,31 +383,31 @@ def calculate_distance(city1: str, city2: str,
     # Get coordinates for both cities
     coords1 = get_coordinates(city1, state1, country1)
     coords2 = get_coordinates(city2, state2, country2)
-    
+
     if 'error' in coords1:
         return coords1
     if 'error' in coords2:
         return coords2
-    
+
     # Calculate distance
     lat1, lon1 = coords1['latitude'], coords1['longitude']
     lat2, lon2 = coords2['latitude'], coords2['longitude']
-    
+
     # Haversine formula
     R = 6371  # Earth's radius in kilometers
-    
+
     lat1_rad, lon1_rad = radians(lat1), radians(lon1)
     lat2_rad, lon2_rad = radians(lat2), radians(lon2)
-    
+
     dlat = lat2_rad - lat1_rad
     dlon = lon2_rad - lon1_rad
-    
+
     a = sin(dlat/2)**2 + cos(lat1_rad) * cos(lat2_rad) * sin(dlon/2)**2
     c = 2 * atan2(sqrt(a), sqrt(1-a))
-    
+
     distance_km = R * c
     distance_miles = distance_km * 0.621371
-    
+
     return {
         'city1': {
             'name': city1,
@@ -418,70 +431,146 @@ def calculate_distance(city1: str, city2: str,
         'distance_miles': round(distance_miles, 2)
     }
 
-# ==================== API HANDLERS ====================
 
-def get_single_city_coordinates(city_name: str) -> Dict:
-    """Get coordinates for a single city"""
-    log('INFO', f'Single city request: {city_name}')
-    return get_coordinates_with_fallback(city_name)
+def get_nearest_graph_vertices(city: str, state: Optional[str] = None,
+                               country: Optional[str] = None,
+                               limit: int = 2) -> Dict[str, Any]:
+    """Find nearest graph vertices to a city's coordinates."""
+    #coords = get_coordinates(city, state, country)
+    #if 'error' in coords:
+    #    return coords
 
-def get_two_cities_coordinates(source_city: str, destination_city: str) -> Dict:
-    """Get coordinates for two cities and calculate distance"""
-    log('INFO', f'Two cities request: {source_city} -> {destination_city}')
-    
-    # Get coordinates for both cities
-    source_coords = get_coordinates_with_fallback(source_city)
-    dest_coords = get_coordinates_with_fallback(destination_city)
-    
-    result = {
-        "source": source_coords,
-        "destination": dest_coords
-    }
-    
-    # Calculate distance if both lookups succeeded
-    if source_coords.get('success') and dest_coords.get('success'):
-        try:
-            distance = calculate_distance(
-                source_coords['latitude'],
-                source_coords['longitude'],
-                dest_coords['latitude'],
-                dest_coords['longitude']
-            )
-            result["distance"] = distance
-            
-            # Add travel context
-            result["travel_context"] = {
-                "from": f"{source_coords.get('formatted_address', source_city)}",
-                "to": f"{dest_coords.get('formatted_address', destination_city)}",
-                "summary": f"From {source_coords.get('country', 'Unknown')} to {dest_coords.get('country', 'Unknown')}"
+    try:
+        #nearest = find_nearest_vertices(
+        #    coords['scaled_latitude'],
+        #    coords['scaled_longitude'],
+        #    limit
+        #)
+        nearest = find_nearest_vertices(
+            45520247,  #coords['scaled_latitude'],
+            -122674194, #coords['scaled_longitude'],
+            2 #limit
+        )
+        print(nearest)
+
+        return {
+        #    'query_location': {
+        #        'city': city,
+        #        'state': state,
+        #        'country': country,
+        #        'latitude': coords['latitude'],
+        #        'longitude': coords['longitude'],
+        #        'scaled_latitude': coords['scaled_latitude'],
+        #        'scaled_longitude': coords['scaled_longitude'],
+        #        'formatted_address': coords.get('formatted_address', '')
+        #    },
+            'nearest_vertices': nearest,
+            'count': len(nearest)
+        }
+
+    except Exception as e:
+        logger.error(f"Error finding nearest vertices: {str(e)}", exc_info=True)
+        return {
+            'error': f"Failed to query graph database: {str(e)}",
+            'query_location': {
+                'city': city,
+                'latitude': coords.get('latitude'),
+                'longitude': coords.get('longitude')
             }
-        except Exception as e:
-            log('ERROR', f'Error calculating distance: {str(e)}')
-            result["distance_error"] = str(e)
-    else:
-        result["note"] = "Distance not calculated because one or both cities could not be geocoded"
-    
-    return result
+        }
+
+
+def get_graph_vertex(vertex_id: str) -> Dict[str, Any]:
+    """Retrieve a specific vertex from the graph by ID."""
+    try:
+        vertex = get_vertex_by_id(vertex_id)
+
+        if vertex is None:
+            return {
+                'error': f'Vertex not found: {vertex_id}'
+            }
+
+        return vertex
+
+    except Exception as e:
+        logger.error(f"Error retrieving vertex: {str(e)}", exc_info=True)
+        return {
+            'error': f"Failed to retrieve vertex: {str(e)}"
+        }
+
+
+def find_graph_path(start_vertex_id: str, end_vertex_id: str, 
+                   max_hops: int = 5) -> Dict[str, Any]:
+    """Find shortest path between two vertices in the graph."""
+    try:
+        path = find_path_between_vertices(start_vertex_id, end_vertex_id, max_hops)
+
+        if path is None:
+            return {
+                'error': f'No path found between {start_vertex_id} and {end_vertex_id}',
+                'start_vertex_id': start_vertex_id,
+                'end_vertex_id': end_vertex_id,
+                'max_hops': max_hops
+            }
+
+        return path
+
+    except Exception as e:
+        logger.error(f"Error finding path: {str(e)}", exc_info=True)
+        return {
+            'error': f"Failed to find path: {str(e)}"
+        }
+
+
+def get_neighbors(vertex_id: str, relationship_type: Optional[str] = None,
+                 direction: str = 'both', limit: int = 10) -> Dict[str, Any]:
+    """Get neighboring vertices connected to a given vertex."""
+    try:
+        neighbors = get_vertex_neighbors(vertex_id, relationship_type, direction, limit)
+
+        return {
+            'vertex_id': vertex_id,
+            'relationship_type': relationship_type,
+            'direction': direction,
+            'neighbors': neighbors,
+            'count': len(neighbors)
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting neighbors: {str(e)}", exc_info=True)
+        return {
+            'error': f"Failed to get neighbors: {str(e)}"
+        }
+
+        
+def test_neptune_connection() -> Dict[str, Any]:
+    """Test Neptune database connection and return stats."""
+    try:
+        return test_connection()
+    except Exception as e:
+        logger.error(f"Neptune connection test failed: {str(e)}", exc_info=True)
+        return {
+            'status': 'error',
+            'error': str(e)
+        }
+
 
 # ==================== LAMBDA HANDLER ====================
 
+
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
-    """
-    Lambda handler for Bedrock Agent action group.
-    """
+    """Lambda handler for Bedrock Agent action group."""
     logger.info(f"Received event: {json.dumps(event, default=str)}")
-    
-    # Extract request details
+
     action_group = event.get('actionGroup', '')
     api_path = event.get('apiPath', '')
     http_method = event.get('httpMethod', '')
     parameters = event.get('parameters', [])
-    
-    # Convert parameters to dict
+
     params = {p['name']: p['value'] for p in parameters}
-    
+
     logger.info(f"Action: {api_path}, Method: {http_method}, Params: {params}")
-    
+
     try:
         # Route to appropriate handler
         if api_path == '/coordinates':
@@ -499,17 +588,40 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 params.get('country1'),
                 params.get('country2')
             )
+        elif api_path == '/nearest-vertices':
+            result = get_nearest_graph_vertices(
+                params.get('city', ''),
+                params.get('state'),
+                params.get('country'),
+                int(params.get('limit', 2))
+            )
+        elif api_path == '/vertex':
+            result = get_graph_vertex(params.get('vertex_id', ''))
+        elif api_path == '/path':
+            result = find_graph_path(
+                params.get('start_vertex_id', ''),
+                params.get('end_vertex_id', ''),
+                int(params.get('max_hops', 5))
+            )
+        elif api_path == '/neighbors':
+            result = get_neighbors(
+                params.get('vertex_id', ''),
+                params.get('relationship_type'),
+                params.get('direction', 'both'),
+                int(params.get('limit', 10))
+            )
+        elif api_path == '/test-connection':
+            result = test_neptune_connection()
         else:
             result = {'error': f'Unknown API path: {api_path}'}
-        
+
         response_code = 200 if 'error' not in result else 400
-        
+
     except Exception as e:
         logger.error(f"Handler error: {str(e)}", exc_info=True)
         result = {'error': str(e)}
         response_code = 500
 
-    # Format response for Bedrock Agent
     return {
         'messageVersion': '1.0',
         'response': {
@@ -531,25 +643,29 @@ if __name__ == "__main__":
     
     # Test event for single city
     test_event_single = {
-        "messageVersion": "1.0",
-        "agent": {
-            "name": "city-coordinates-agent",
-            "version": "DRAFT",
-            "id": "TEST123",
-            "alias": "TSTALIASID"
+      "actionGroup": "CityCoordinatesActions",
+      "apiPath": "/nearest-vertices",
+      "httpMethod": "get",
+      "parameters": [
+        {
+          "name": "city",
+          "value": "portland"
         },
-        "actionGroup": "CityCoordinatesActions",
-        "apiPath": "/getCityCoordinates",
-        "httpMethod": "GET",
-        "parameters": [
-            {
-                "name": "cityName",
-                "type": "string",
-                "value": "Tokyo"
-            }
-        ]
+        {
+          "name": "state",
+          "value": "oregon"
+        },
+        {
+          "name": "country",
+          "value": "usa"
+        },
+        {
+          "name": "limit",
+          "value": 3
+        }
+      ]
     }
-    
+
     # Test event for two cities
     test_event_two = {
         "messageVersion": "1.0",
@@ -606,7 +722,7 @@ if __name__ == "__main__":
  #   print("\n" + "="*80)
  #   print("Testing Single City Lookup")
  #   print("="*80)
- #   result1 = lambda_handler(test_event_single, MockContext())
+    result1 = lambda_handler(test_event_single, MockContext())
  #   print(json.dumps(result1, indent=2, cls=DecimalEncoder))
  #   
  #   print("\n" + "="*80)

@@ -106,14 +106,13 @@ echo -e "${GREEN}✓ Parameters file created${NC}\n"
 echo -e "${YELLOW}Creating Lambda deployment package...${NC}"
 
 mkdir -p lambda-package
-cp lambda_function.py lambda-package/
+cp lambda_function.py neptune_connection.py lambda-package/
 
 # Install dependencies
 cd lambda-package
-pip install requests -t . --quiet
+pip install requests requests-auth-aws-sigv4 boto3 -t . --quiet
 zip -r ../lambda-deployment.zip . > /dev/null
 cd ..
-
 echo -e "${GREEN}✓ Lambda package created${NC}\n"
 
 # Validate CloudFormation template
